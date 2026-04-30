@@ -45,6 +45,10 @@ public class CheckoutFlowPlugin: NSObject, FlutterPlugin {
         let environment = (args["environment"] as? String) ?? "sandbox"
         let locale = args["locale"] as? String
         let title = args["title"] as? String
+        // Apple Pay merchant ID is iOS-only — Android doesn't read this
+        // arg. When non-nil and matching the Runner's entitlement,
+        // the Flow SDK renders an Apple Pay button beside the card form.
+        let applePayMerchantId = args["applePayMerchantId"] as? String
 
         guard let presenter = Self.topViewController() else {
             result(FlutterError(
@@ -61,6 +65,7 @@ public class CheckoutFlowPlugin: NSObject, FlutterPlugin {
             environment: environment,
             locale: locale,
             title: title,
+            applePayMerchantId: applePayMerchantId,
             completion: { outcome in
                 switch outcome {
                 case .cancelled:

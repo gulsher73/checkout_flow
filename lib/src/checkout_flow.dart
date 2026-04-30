@@ -25,12 +25,21 @@ class CheckoutFlow {
   ///
   /// [title] is the screen title shown above the Flow component on Android.
   /// (iOS uses the standard navigation bar with a Cancel button.)
+  ///
+  /// [applePayMerchantId] is the Apple Merchant ID (e.g.
+  /// `merchant.com.example.app`) registered in the iOS host's
+  /// `Runner.entitlements > com.apple.developer.in-app-payments`.
+  /// When supplied AND the BFF's payment-session enables `applepay`,
+  /// an Apple Pay button is rendered beside the card form on iOS. The
+  /// arg is ignored on Android (Google Pay's merchant config lives in
+  /// the payment session, not on the SDK init).
   static Future<CheckoutFlowResult> launch({
     required Map<String, dynamic> paymentSession,
     required String publicKey,
     CheckoutFlowEnvironment environment = CheckoutFlowEnvironment.sandbox,
     String? locale,
     String? title,
+    String? applePayMerchantId,
   }) async {
     try {
       final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>(
@@ -41,6 +50,7 @@ class CheckoutFlow {
           'environment': environment.wireValue,
           'locale': ?locale,
           'title': ?title,
+          'applePayMerchantId': ?applePayMerchantId,
         },
       );
       if (raw == null) {

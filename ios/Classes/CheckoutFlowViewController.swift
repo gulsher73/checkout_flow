@@ -34,6 +34,13 @@ final class CheckoutFlowViewController: UIViewController {
     private let environment: String
     private let locale: String?
     private let screenTitle: String?
+    /// Apple Pay merchant identifier registered in the host app's
+    /// entitlements (e.g. `merchant.com.alfardanexchange.alfapay`).
+    /// When non-nil/non-empty, the Flow component renders an Apple Pay
+    /// button alongside the card form. Must match a merchant ID in
+    /// `Runner.entitlements > com.apple.developer.in-app-payments`,
+    /// otherwise the SDK silently hides the button at runtime.
+    private let applePayMerchantId: String?
     private let completion: (CheckoutFlowOutcome) -> Void
 
     private var hasFinished = false
@@ -61,6 +68,7 @@ final class CheckoutFlowViewController: UIViewController {
         environment: String,
         locale: String?,
         title: String?,
+        applePayMerchantId: String?,
         completion: @escaping (CheckoutFlowOutcome) -> Void
     ) {
         self.paymentSession = paymentSession
@@ -68,6 +76,7 @@ final class CheckoutFlowViewController: UIViewController {
         self.environment = environment
         self.locale = locale
         self.screenTitle = title
+        self.applePayMerchantId = applePayMerchantId
         self.completion = completion
         super.init(nibName: nil, bundle: nil)
     }
@@ -169,16 +178,27 @@ final class CheckoutFlowViewController: UIViewController {
         let sdk = CheckoutComponents(configuration: configuration)
         self.sdk = sdk
 
-        // Step 3 — Flow component. We accept card payments by default; Apple
-        // Pay etc. can be enabled later by extending the launch args.
-        let cardMethod: CheckoutComponents.PaymentMethod = .card(
-            showPayButton: true,
-            paymentButtonAction: .payment,
-            cardConfiguration: .init(),
-            addressConfiguration: nil,
-            rememberMeConfiguration: nil
-        )
-        let flowComponent = try sdk.create(.flow(options: [cardMethod]))
+        // Step 3 — Flow component. Card is always enabled; Apple Pay is
+        // enabled when the host passes a `merchant.*` identifier that
+        // matches its `Runner.entitlements`. The Checkout SDK will only
+        // actually render the Apple Pay button if:
+        //   1. This option is present here, AND
+        //   2. The BFF's payment-session enabled `applepay` in its
+        //      `payment_methods` array, AND
+        //   3. The device supports Apple Pay (PassKit canMakePayments).
+        var options: [CheckoutComponents.PaymentMethod] = [
+            .card(
+                showPayButton: true,
+                paymentButtonAction: .payment,
+                cardConfiguration: .init(),
+                addressConfiguration: nil,
+                rememberMeConfiguration: nil
+            ),
+        ]
+        if let merchantId = applePayMerchantId, !merchantId.isEmpty {
+            options.append(.applePay(merchantIdentifier: merchantId))
+        }
+        let flowComponent = try sdk.create(.flow(options: options))
 
         // Step 4 — Render and host the SwiftUI view.
         guard
