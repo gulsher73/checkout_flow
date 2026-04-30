@@ -268,18 +268,23 @@ class CheckoutFlowActivity : AppCompatActivity() {
         // Pay. (Apple Pay isn't relevant on Android.) The Checkout SDK
         // throws "GooglePayFlowCoordinator is required" if Google Pay
         // is enabled in the payment session and we don't pass one,
-        // even if the user only intends to pay with a card. Wiring it
-        // unconditionally is harmless — the SDK only invokes it when
-        // Google Pay is actually picked.
+        // so we wire it unconditionally — harmless when the session
+        // doesn't enable Google Pay.
+        //
+        // The coordinator's `handleActivityResult` callback receives
+        // the (resultCode, paymentData) pair from Google Pay's
+        // ActivityResult contract. Per Checkout's docs we MUST forward
+        // these to `CheckoutComponents.handleActivityResult(...)` so
+        // the SDK can decode the PaymentData and complete the Flow.
+        // Skipping this forwarding leaves Google Pay payments stuck.
+        // We capture `this.components` lazily inside the lambda
+        // because the `CheckoutComponents` instance is created right
+        // after this map is built.
         val flowCoordinators: Map<PaymentMethodName, FlowCoordinator> = mapOf(
             PaymentMethodName.GooglePay to GooglePayFlowCoordinator(
                 this,
-            ) { _, _ ->
-                // The SDK consumes the payment-data callback internally
-                // (status code + tokenized payment data string). We
-                // don't need custom handling here — the umbrella
-                // `componentCallback.onSuccess` / `onError` still fires
-                // with the final payment outcome.
+            ) { resultCode, data ->
+                this.components?.handleActivityResult(resultCode, data)
             },
         )
 
