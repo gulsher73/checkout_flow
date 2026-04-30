@@ -252,7 +252,12 @@ class CheckoutFlowActivity : AppCompatActivity() {
                 )
             },
             onTokenized = { },
-            handleTap = { false },
+            // Returning `true` tells the SDK to process the Pay-button tap
+            // itself (tokenize → call payment-session → 3DS → invoke
+            // onSuccess / onError). With `false` the SDK expects the
+            // integrator to call `flow.submit()` manually — which we
+            // don't, so the button does nothing visible to the user.
+            handleTap = { true },
         )
 
         val configuration = CheckoutComponentConfiguration(
