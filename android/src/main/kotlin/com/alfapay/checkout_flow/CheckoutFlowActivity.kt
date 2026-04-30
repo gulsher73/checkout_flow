@@ -22,9 +22,12 @@ import com.checkout.components.interfaces.api.CheckoutComponents
 import com.checkout.components.interfaces.api.PaymentMethodComponent
 import com.checkout.components.interfaces.component.CheckoutComponentConfiguration
 import com.checkout.components.interfaces.component.ComponentCallback
+import com.checkout.components.interfaces.component.FlowCoordinator
 import com.checkout.components.interfaces.error.CheckoutError
 import com.checkout.components.interfaces.model.ComponentName
+import com.checkout.components.interfaces.model.PaymentMethodName
 import com.checkout.components.interfaces.model.PaymentSessionResponse
+import com.checkout.components.wallet.wrapper.GooglePayFlowCoordinator
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
@@ -260,6 +263,26 @@ class CheckoutFlowActivity : AppCompatActivity() {
             handleTap = { true },
         )
 
+        // Flow coordinators wire in alternative payment methods that
+        // need extra setup beyond the standard card form. Today: Google
+        // Pay. (Apple Pay isn't relevant on Android.) The Checkout SDK
+        // throws "GooglePayFlowCoordinator is required" if Google Pay
+        // is enabled in the payment session and we don't pass one,
+        // even if the user only intends to pay with a card. Wiring it
+        // unconditionally is harmless — the SDK only invokes it when
+        // Google Pay is actually picked.
+        val flowCoordinators: Map<PaymentMethodName, FlowCoordinator> = mapOf(
+            PaymentMethodName.GooglePay to GooglePayFlowCoordinator(
+                this,
+            ) { _, _ ->
+                // The SDK consumes the payment-data callback internally
+                // (status code + tokenized payment data string). We
+                // don't need custom handling here — the umbrella
+                // `componentCallback.onSuccess` / `onError` still fires
+                // with the final payment outcome.
+            },
+        )
+
         val configuration = CheckoutComponentConfiguration(
             context = this,
             publicKey = publicKey,
@@ -270,7 +293,7 @@ class CheckoutFlowActivity : AppCompatActivity() {
                 paymentSessionSecret = sessionSecret,
             ),
             componentOptions = emptyMap(),
-            flowCoordinators = emptyMap(),
+            flowCoordinators = flowCoordinators,
             locale = null,
             translations = null,
             appearance = null,
