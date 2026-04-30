@@ -1,7 +1,7 @@
 name: checkout_flow
 description: "Flutter bridge for Checkout.com's native Flow Components SDK (iOS + Android)."
 version: 0.0.1
-homepage: https://github.com/alfapay/checkout_flow
+homepage: https://github.com/gulsher73/checkout_flow
 
 environment:
   sdk: ^3.11.0

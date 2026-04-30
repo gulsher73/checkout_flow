@@ -10,7 +10,7 @@ Pod::Spec.new do |s|
     Wraps Checkout.com's native iOS Flow Components SDK behind a Dart
     MethodChannel. Drop-in pluggable into any Flutter app.
   DESC
-  s.homepage         = 'https://github.com/alfapay/checkout_flow'
+  s.homepage         = 'https://github.com/gulsher73/checkout_flow'
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'AlfaPay' => 'engineering@alfapay.ae' }
   s.source           = { :path => '.' }

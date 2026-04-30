@@ -17,7 +17,7 @@ the user's payment outcome to Dart.
 dependencies:
   checkout_flow:
     git:
-      url: https://github.com/alfapay/checkout_flow
+      url: https://github.com/gulsher73/checkout_flow
       ref: main
     # …or once published: checkout_flow: ^0.0.1
 ```
