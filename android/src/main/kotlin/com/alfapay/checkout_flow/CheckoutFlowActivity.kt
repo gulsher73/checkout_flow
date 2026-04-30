@@ -3,41 +3,39 @@ package com.alfapay.checkout_flow
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
 import android.os.Bundle
-import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
-import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.lifecycleScope
+import com.checkout.components.core.CheckoutComponentsFactory
+import com.checkout.components.interfaces.Environment
+import com.checkout.components.interfaces.api.CheckoutComponents
+import com.checkout.components.interfaces.api.PaymentMethodComponent
+import com.checkout.components.interfaces.component.CheckoutComponentConfiguration
+import com.checkout.components.interfaces.component.ComponentCallback
+import com.checkout.components.interfaces.error.CheckoutError
+import com.checkout.components.interfaces.model.ComponentName
+import com.checkout.components.interfaces.model.PaymentSessionResponse
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 /**
  * Hosts the native Checkout.com Flow component. Returns the user's outcome
- * (completed / failed / cancelled) to the caller via `setResult` →
- * [CheckoutFlowPlugin.onActivityResult].
+ * to the caller via `setResult` → [CheckoutFlowPlugin.onActivityResult].
  *
- * ─────────────────────────────────────────────────────────────────────────
- * TODO — wire the actual `CheckoutComponentsFactory` API
- * ─────────────────────────────────────────────────────────────────────────
- * The published `com.checkout:checkout-android-components:1.0.0` SDK
- * exposes a different API surface than the version this file was originally
- * drafted against:
- *
- *   • Entry class    : `com.checkout.components.core.CheckoutComponentsFactory`
- *   • Configuration  : (see Checkout.com Android docs — likely
- *                       `CheckoutComponentsConfiguration` builder)
- *   • Environment    : likely under `com.checkout.components.core` or
- *                       a sub-package
- *
- * Until those calls are wired, [startFlow] returns a `not_implemented`
- * failure to the Dart layer. The Activity scaffolding (toolbar, container,
- * back-press as cancel, result plumbing) is correct and reusable — only
- * the Checkout SDK invocation in [startFlow] needs filling in.
- * ─────────────────────────────────────────────────────────────────────────
+ * Wired against `com.checkout:checkout-android-components:1.0.0+`. The
+ * SDK is an `implementation` dep at the plugin level and consumer apps
+ * must additionally declare it (or `mavenCentral()` + `JitPack` repos
+ * for the transitive Risk SDK + Fingerprint Pro) in their settings.
  */
 class CheckoutFlowActivity : AppCompatActivity() {
 
@@ -65,7 +63,6 @@ class CheckoutFlowActivity : AppCompatActivity() {
                 putExtra(EXTRA_TITLE, title)
             }
 
-        /** Translate `setResult` payload into a serialisable channel response. */
         fun parseResult(resultCode: Int, data: Intent?): ResultPayload {
             if (resultCode != Activity.RESULT_OK || data == null) {
                 return ResultPayload(status = "cancelled")
@@ -102,6 +99,7 @@ class CheckoutFlowActivity : AppCompatActivity() {
         )
     }
 
+    private var components: CheckoutComponents? = null
     private var finished = false
 
     private lateinit var flowContainer: FrameLayout
@@ -109,32 +107,46 @@ class CheckoutFlowActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Android 15 (API 35) draws apps edge-to-edge by default — pad
+        // the root view by status bar / nav bar / cutout insets so the
+        // close button isn't hidden under the status bar.
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         setContentView(buildContentView())
 
-        try {
-            startFlow()
-        } catch (t: Throwable) {
-            finishWith(
-                ResultPayload(
-                    status = "failed",
-                    errorCode = "init_failed",
-                    errorMessage = t.message ?: "Failed to initialise Checkout SDK",
-                ),
-            )
+        WindowCompat.getInsetsController(window, window.decorView)
+            .isAppearanceLightStatusBars = true
+
+        lifecycleScope.launch {
+            try {
+                startFlow()
+            } catch (t: Throwable) {
+                android.util.Log.e(
+                    "checkout_flow",
+                    "startFlow() failed: ${t.javaClass.name}: ${t.message}",
+                    t,
+                )
+                finishWith(
+                    ResultPayload(
+                        status = "failed",
+                        errorCode = "init_failed",
+                        errorMessage = t.message ?: "Failed to initialise Checkout SDK",
+                    ),
+                )
+            }
         }
     }
 
-    @Deprecated("Treat system back as explicit cancel")
+    @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         finishWith(ResultPayload("cancelled"))
+        @Suppress("DEPRECATION")
         super.onBackPressed()
     }
-
-    // ── UI scaffolding ────────────────────────────────────────────────
 
     private fun buildContentView(): View {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.WHITE)
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -142,10 +154,14 @@ class CheckoutFlowActivity : AppCompatActivity() {
         }
         val toolbar = Toolbar(this).apply {
             title = intent.getStringExtra(EXTRA_TITLE) ?: "Payment"
+            setTitleTextColor(Color.BLACK)
+            setBackgroundColor(Color.WHITE)
             setNavigationIcon(android.R.drawable.ic_menu_close_clear_cancel)
+            setNavigationContentDescription(android.R.string.cancel)
             setNavigationOnClickListener {
                 finishWith(ResultPayload("cancelled"))
             }
+            elevation = resources.displayMetrics.density * 2f
         }
         flowContainer = FrameLayout(this).apply {
             id = View.generateViewId()
@@ -157,59 +173,112 @@ class CheckoutFlowActivity : AppCompatActivity() {
         }
         progressBar = ProgressBar(this).apply {
             isIndeterminate = true
-            layoutParams = FrameLayout.LayoutParams(
+            val params = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { gravity = Gravity.CENTER }
+            )
+            params.gravity = android.view.Gravity.CENTER
+            layoutParams = params
         }
         flowContainer.addView(progressBar)
-        flowContainer.addView(
-            TextView(this).apply {
-                text =
-                    "Checkout Flow not yet wired against SDK 1.0.0.\n" +
-                    "See CheckoutFlowActivity.kt TODO."
-                gravity = Gravity.CENTER
-                setPadding(48, 0, 48, 0)
-                layoutParams = FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                ).apply { gravity = Gravity.CENTER }
-            },
-        )
         root.addView(toolbar)
         root.addView(flowContainer)
+
+        ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or
+                    WindowInsetsCompat.Type.displayCutout(),
+            )
+            v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
+
         return root
     }
 
-    // ── Checkout SDK wiring (TODO: implement against 1.0.0 API) ───────
-
-    private fun startFlow() {
-        // Read the inputs so the wiring will be ready when the SDK call
-        // is filled in. Currently they're only validated.
-        intent.getStringExtra(EXTRA_PAYMENT_SESSION)
+    private suspend fun startFlow() {
+        val sessionJson = intent.getStringExtra(EXTRA_PAYMENT_SESSION)
             ?: throw IllegalStateException("Missing payment session payload")
-        intent.getStringExtra(EXTRA_PUBLIC_KEY)
+        val publicKey = intent.getStringExtra(EXTRA_PUBLIC_KEY)
             ?: throw IllegalStateException("Missing public key")
-        intent.getStringExtra(EXTRA_ENVIRONMENT) ?: "sandbox"
-        intent.getStringExtra(EXTRA_LOCALE)
+        val envName = intent.getStringExtra(EXTRA_ENVIRONMENT) ?: "sandbox"
 
-        // Stub: report not_implemented so the Dart layer surfaces a clear
-        // error instead of hanging. Replace this body with the actual
-        // CheckoutComponentsFactory.create(...).render(flowContainer)
-        // call once the 1.0.0 API is mapped.
-        progressBar.visibility = View.GONE
-        finishWith(
-            ResultPayload(
-                status = "failed",
-                errorCode = "not_implemented",
-                errorMessage =
-                    "Android Checkout Flow not yet wired against SDK 1.0.0 — " +
-                        "see CheckoutFlowActivity.kt TODO",
-            ),
+        val environment = if (envName.equals("production", ignoreCase = true)) {
+            Environment.PRODUCTION
+        } else {
+            Environment.SANDBOX
+        }
+
+        // Both spellings (snake/camel + short alias) come over from Dart;
+        // the SDK requires id + secret + token to skip the device-API
+        // hydration call (which 401s for some merchant configs).
+        val sessionObj = JSONObject(sessionJson)
+        val sessionId = sessionObj.optString("id")
+        val sessionSecret = sessionObj.optString("secret")
+        val sessionToken = sessionObj.optString("token")
+
+        require(sessionId.isNotEmpty() && sessionSecret.isNotEmpty()) {
+            "payment_session_json must contain 'id' and 'secret'"
+        }
+        require(sessionToken.isNotEmpty()) {
+            "payment_session_json must contain 'token' (alias of payment_session_token)"
+        }
+
+        val callback = ComponentCallback(
+            onReady = {
+                progressBar.visibility = View.GONE
+            },
+            onChange = { },
+            onSubmit = { },
+            onSuccess = { _: PaymentMethodComponent, paymentId: String ->
+                finishWith(
+                    ResultPayload(
+                        status = "completed",
+                        paymentId = paymentId,
+                    ),
+                )
+            },
+            onError = { _: PaymentMethodComponent, error: CheckoutError ->
+                android.util.Log.e(
+                    "checkout_flow",
+                    "Checkout onError: code=${error.code} | message=${error.message}",
+                )
+                finishWith(
+                    ResultPayload(
+                        status = "failed",
+                        errorCode = error.code.name,
+                        errorMessage = "${error.code.name}: ${error.message}",
+                    ),
+                )
+            },
+            onTokenized = { },
+            handleTap = { false },
         )
-    }
 
-    // ── Result plumbing ───────────────────────────────────────────────
+        val configuration = CheckoutComponentConfiguration(
+            context = this,
+            publicKey = publicKey,
+            environment = environment,
+            paymentSession = PaymentSessionResponse(
+                id = sessionId,
+                paymentSessionToken = sessionToken,
+                paymentSessionSecret = sessionSecret,
+            ),
+            componentOptions = emptyMap(),
+            flowCoordinators = emptyMap(),
+            locale = null,
+            translations = null,
+            appearance = null,
+            componentCallback = callback,
+        )
+
+        val components = CheckoutComponentsFactory(configuration).create()
+        this.components = components
+
+        val flow: PaymentMethodComponent = components.create(ComponentName.Flow)
+        val flowView = flow.provideView(flowContainer)
+        flowContainer.addView(flowView)
+    }
 
     private fun finishWith(payload: ResultPayload) {
         if (finished) return
